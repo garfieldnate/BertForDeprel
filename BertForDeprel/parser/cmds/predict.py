@@ -114,18 +114,17 @@ class Predict(CMD):
         # TODO: what are these return values?
         return chuliu_heads_list, deprels_pred_chuliu
 
-    def __prediction_iterator(self, batch: SequencePredictionBatch_T, preds: BertForDeprelBatchOutput, pred_dataset: ConlluDataset, partial_pred_config: PartialPredictionConfig, device: str):
-        idx_batch = batch.idx
-
-        for i_sentence in range(batch.sequence_token_ids.size()[0]):
-            raw_sentence_preds = preds.distributions_for_sentence(i_sentence)
+    def __prediction_iterator(self, preds: BertForDeprelBatchOutput, pred_dataset: ConlluDataset, partial_pred_config: PartialPredictionConfig, device: str):
+        # TODO: build this iterator into the batch preds class
+        for sentence_idx in preds.idx:
+            raw_sentence_preds = preds.distributions_for_sentence(int(sentence_idx))
 
             # TODO Next: encapsulate below in the output classes;
             # these will then be containers for the raw model outputs, with methods for constructing the final predictions.
             # the overwrite logic should be done in a separate step, I think.
             # Start by encapsulating the n_sentence and pred_dataset stuff into the output classes.
-            sentence_idx = idx_batch[i_sentence]
-            n_sentence = int(sentence_idx)
+            # sentence_idx = batch.idx[i_sentence]
+            # n_sentence = int(sentence_idx)
 
             (chuliu_heads_list, deprels_pred_chuliu) = self.__get_constrained_dependencies(
                 heads_pred_sentence=raw_sentence_preds.heads,
@@ -133,7 +132,7 @@ class Predict(CMD):
                 subwords_start_sentence=raw_sentence_preds.subwords_start,
                 pred_dataset=pred_dataset,
                 keep_heads=partial_pred_config.keep_heads,
-                n_sentence=n_sentence,
+                n_sentence=int(sentence_idx),
                 idx_converter_sentence=raw_sentence_preds.idx_converter,
                 device=device,)
 
@@ -160,7 +159,7 @@ class Predict(CMD):
             ].tolist()
 
             yield pred_dataset.construct_sentence_prediction(
-                            n_sentence,
+                            int(sentence_idx),
                             uposs_pred_list,
                             xposs_pred_list,
                             chuliu_heads_list,
@@ -195,7 +194,7 @@ class Predict(CMD):
 
                     time_from_start = 0
                     parsing_speed = 0
-                    for predicted_sentence in self.__prediction_iterator(batch, preds, pred_dataset, partial_pred_config, args.device):
+                    for predicted_sentence in self.__prediction_iterator(preds, pred_dataset, partial_pred_config, args.device):
                         predicted_sentences.append(predicted_sentence)
 
                         parsed_sentence_counter += 1

@@ -27,6 +27,9 @@ class BertForDeprelSentenceOutput:
     # Maps word index + 1 to the index in the sequence_token_ids where the word begins. Size is (W).
     idx_converter: torch.Tensor
 
+    # Index of the sentence in the original dataset.
+    idx: int
+
 
 @dataclass
 class BertForDeprelBatchOutput:
@@ -45,6 +48,8 @@ class BertForDeprelBatchOutput:
     # Maps word index + 1 to the index in the sequence_token_ids where the word begins. Size is (B, W).
     idx_converter: torch.Tensor
 
+    # Size (B,). Index of each sentence in the original dataset.
+    idx: torch.Tensor
 
     def detach(self):
         """Return a new result with all of the Tensors detached from backprop (used for prediction)."""
@@ -56,7 +61,8 @@ class BertForDeprelBatchOutput:
             deprels=self.deprels.detach(),
             heads=self.heads.detach(),
             subwords_start=self.subwords_start,
-            idx_converter=self.idx_converter
+            idx_converter=self.idx_converter,
+            idx=self.idx
         )
 
     def distributions_for_sentence(self, sentence_idx: int) -> BertForDeprelSentenceOutput:
@@ -69,5 +75,6 @@ class BertForDeprelBatchOutput:
             feats= self.feats[sentence_idx].clone(),
             lemma_scripts=self.lemma_scripts[sentence_idx].clone(),
             subwords_start = self.subwords_start[sentence_idx],
-            idx_converter = self.idx_converter[sentence_idx]
+            idx_converter = self.idx_converter[sentence_idx],
+            idx=int(self.idx[sentence_idx])
         )

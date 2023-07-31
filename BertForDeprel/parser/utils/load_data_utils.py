@@ -65,9 +65,11 @@ class SequenceTraining_T(SequencePrediction_T):
 # batch classes are for entire datasets of parses
 @dataclass
 class SequencePredictionBatch_T:
-    """Except for attn_masks and max_sentence_legth, each field contains all of the tensors of the corresponding field in
+    """Except for idx, attn_masks and max_sentence_legth, each field contains all of the tensors of the corresponding field in
     SequencePrediction_T for each sequence in the batch. See that class for more details.
     Sizes are then (B, T or W) for each batched field."""
+
+    # Size is (B,); index for each sequence in the original dataset.
     idx: Tensor
     sequence_token_ids: Tensor
     # Tensor of shape [batch_size, max_seq_length] containing attention masks to be used to avoid contribution of PAD tokens.
