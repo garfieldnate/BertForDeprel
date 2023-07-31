@@ -67,7 +67,7 @@ class Predict(CMD):
 
     # TODO Next: explain current return type. Return type differs from other
     # method. Can we refactor to join them?
-    def __get_constrained_dependencies(self, heads_pred_sentence: Tensor, deprels_pred, subwords_start_sentence, keep_heads: CopyOption, pred_dataset: ConlluDataset, n_sentence: int, idx_converter_sentence: Tensor, device: str):
+    def __get_constrained_dependencies(self, heads_pred_sentence: Tensor, deprels_pred, subwords_start_sentence, keep_heads: CopyOption, pred_dataset: ConlluDataset, n_sentence: int, idx_converter_sentence: Tensor):
         """"""
         # TODO: explain these
         head_true_like = heads_pred_sentence.max(dim=0).indices
@@ -101,8 +101,9 @@ class Predict(CMD):
             ] = idx_converter_sentence[chuliu_head_pred]
             chuliu_heads_list.append(int(chuliu_head_pred))
 
-        # move to device where deprels_pred lives to satisfy _deprel_pred_for_heads requirements
-        chuliu_heads_pred = torch.tensor(chuliu_heads_pred).to(device)
+        # move to device where deprels_pred lives so they can be operated on together
+        # in _deprel_pred_for_heads
+        chuliu_heads_pred = torch.tensor(chuliu_heads_pred).to(deprels_pred.device)
 
         # function is designed to work with batch inputs;
         # unsqueeze to add dummy batch dimension to fit expected input shape, and
@@ -114,7 +115,7 @@ class Predict(CMD):
         # TODO: what are these return values?
         return chuliu_heads_list, deprels_pred_chuliu
 
-    def __prediction_iterator(self, preds: BertForDeprelBatchOutput, pred_dataset: ConlluDataset, partial_pred_config: PartialPredictionConfig, device: str):
+    def __prediction_iterator(self, preds: BertForDeprelBatchOutput, pred_dataset: ConlluDataset, partial_pred_config: PartialPredictionConfig):
         # TODO: build this iterator into the batch preds class
         for sentence_idx in preds.idx:
             raw_sentence_preds = preds.distributions_for_sentence(int(sentence_idx))
@@ -133,8 +134,7 @@ class Predict(CMD):
                 pred_dataset=pred_dataset,
                 keep_heads=partial_pred_config.keep_heads,
                 n_sentence=int(sentence_idx),
-                idx_converter_sentence=raw_sentence_preds.idx_converter,
-                device=device,)
+                idx_converter_sentence=raw_sentence_preds.idx_converter)
 
             mask = raw_sentence_preds.subwords_start
 
@@ -194,7 +194,7 @@ class Predict(CMD):
 
                     time_from_start = 0
                     parsing_speed = 0
-                    for predicted_sentence in self.__prediction_iterator(preds, pred_dataset, partial_pred_config, args.device):
+                    for predicted_sentence in self.__prediction_iterator(preds, pred_dataset, partial_pred_config):
                         predicted_sentences.append(predicted_sentence)
 
                         parsed_sentence_counter += 1
