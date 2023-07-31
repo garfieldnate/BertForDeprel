@@ -30,8 +30,10 @@ class SequencePrediction_T:
     """The token ids of the sequence, prepended with a CLS token and appended with a SEP token as required
     by BERT models. Size is (T)."""
     sequence_token_ids: List[int]
-    """1 if sequence token begins a new word, 0 otherwise. Size is (T)."""
-    subwords_start: List[int]
+    """True if sequence token begins a new word and for the leading CLS token; False
+    otherwise. Size is (T). We set to True for the leading CLS token so that the
+    Chu-Liu-Edmonds algorithm can use it as the root."""
+    subwords_start: List[bool]
 
     """Maps word index + 1 to the index in the sequence_token_ids where the word begins. Size is (W)."""
     idx_converter: List[int]
@@ -234,7 +236,7 @@ class ConlluDataset(Dataset):
 
     def _get_input(self, sequence: sentenceJson_T, idx: int) -> SequencePrediction_T:
         sequence_ids = [self.CLS_token_id]
-        subwords_start = [DUMMY_ID]
+        subwords_start = [True]
 
         idx_converter = [0]
         tokens_len = [1]
@@ -252,7 +254,7 @@ class ConlluDataset(Dataset):
             idx_converter.append(len(sequence_ids))
             tokens_len.append(len(token_ids))
 
-            subword_start = [1] + [0] * (len(token_ids) - 1)
+            subword_start = [True] + [False] * (len(token_ids) - 1)
             sequence_ids += token_ids
             subwords_start += subword_start
 

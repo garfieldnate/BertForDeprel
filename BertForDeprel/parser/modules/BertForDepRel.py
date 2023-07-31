@@ -267,17 +267,10 @@ class BertForDeprel(Module):
     def chuliu_heads_pred(self, batch, model_output) -> torch.Tensor:
         chuliu_heads_pred = batch.heads.clone()
         for i_sentence, (heads_pred_sentence, subwords_start_sentence, idx_converter_sentence) in enumerate(zip(model_output.heads, batch.subwords_start, batch.idx_converter)):
-            # clone so that we can edit in-place below
-            # TODO: but gradient is turned off. Isn't this unnecessary?
-            # TODO: what does "with root" indicate?
-            subwords_start_with_root = subwords_start_sentence.clone()
-
-            # TODO: why?
-            subwords_start_with_root[0] = True
             # TODO: explain. What is np here?
             heads_pred_np = heads_pred_sentence[
-                :,subwords_start_with_root == 1
-            ][subwords_start_with_root == 1]
+                :,subwords_start_sentence
+            ][subwords_start_sentence]
             # TODO: why?
             heads_pred_np = heads_pred_np.cpu().numpy()
 

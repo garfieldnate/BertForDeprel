@@ -1,6 +1,6 @@
 from torch import Tensor
 
-from BertForDeprel.parser.utils.load_data_utils import SequencePredictionBatch_T
+from ..utils.load_data_utils import SequencePredictionBatch_T
 from .BiAffineTrankit import FixedClassDeepBiAffineClassifier
 from .BertForDepRelOutput import BertForDeprelBatchOutput
 
@@ -20,7 +20,6 @@ class PosAndDeprelParserHead(Module):
         self.deprel = FixedClassDeepBiAffineClassifier(self.down_dim, self.down_dim,
                                     self.down_dim, n_deprels)
 
-        # Label POS
         self.uposs_ffn = Linear(llm_output_size, n_uposs)
         self.xposs_ffn = Linear(llm_output_size, n_xposs)
         self.feats_ffn = Linear(llm_output_size, n_feats)

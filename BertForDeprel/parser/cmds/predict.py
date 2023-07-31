@@ -73,17 +73,10 @@ class Predict(CMD):
         chuliu_heads_pred = head_true_like.clone().cpu().numpy()
         chuliu_heads_list: List[int] = []
 
-        # clone so that we can edit in-place below
-        # TODO: but gradient is turned off. Isn't this unnecessary?
-        # TODO: what does "with root" indicate?
-        subwords_start_with_root = subwords_start.clone()
-
-        # TODO: why?
-        subwords_start_with_root[0] = True
         # TODO: explain. What is np here?
         heads_pred_np = heads_pred_sentence[
-            :, subwords_start_with_root == 1
-        ][subwords_start_with_root == 1]
+            :, subwords_start
+        ][subwords_start]
         # TODO: why?
         heads_pred_np = heads_pred_np.cpu().numpy()
 
@@ -135,27 +128,26 @@ class Predict(CMD):
                 idx_converter_sentence=raw_sentence_preds.idx_converter,
                 device=device,)
 
-            # TODO: would it not be better if this were a boolean vector to begin with?
-            is_word_start = raw_sentence_preds.subwords_start == 1
+            mask = raw_sentence_preds.subwords_start
 
             deprels_pred_chuliu_list = deprels_pred_chuliu.max(dim=0).indices[
-                is_word_start
+                mask
             ].tolist()
 
             uposs_pred_list = raw_sentence_preds.uposs.max(dim=1).indices[
-                is_word_start
+                mask
             ].tolist()
 
             xposs_pred_list = raw_sentence_preds.xposs.max(dim=1).indices[
-                is_word_start
+                mask
             ].tolist()
 
             feats_pred_list = raw_sentence_preds.feats.max(dim=1).indices[
-                is_word_start
+                mask
             ].tolist()
 
             lemma_scripts_pred_list = raw_sentence_preds.lemma_scripts.max(dim=1).indices[
-                is_word_start
+                mask
             ].tolist()
 
             yield pred_dataset.construct_sentence_prediction(
