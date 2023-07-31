@@ -4,7 +4,7 @@ from torch import sum as tsum
 
 from .load_data_utils import DUMMY_ID
 
-def _deprel_pred_for_heads(deprel_scores_pred: Tensor, heads_pred: Tensor):
+def _deprel_pred_for_heads(deprel_scores_pred: Tensor, head_idx_pred: Tensor):
     """
     Given the dependency relation label score predictions for all possible heads of each word and
     the list of predicted heads, return the scores with the head dimension removed, and just the
@@ -14,7 +14,7 @@ def _deprel_pred_for_heads(deprel_scores_pred: Tensor, heads_pred: Tensor):
     Read indexing as [sentence_index][deprel_label_index][dependent_index][head_index], with the
     last dimension containing the scores for each potential head of the dependent.
 
-    heads_pred: tensor with two dimensions: (batch_len, seq_len). Read indexing as
+    head_idx_pred: tensor with two dimensions: (batch_len, seq_len). Read indexing as
     [sentence_index][dependent_index], with the value at each index being the predicted head
     index.
 
@@ -28,21 +28,21 @@ def _deprel_pred_for_heads(deprel_scores_pred: Tensor, heads_pred: Tensor):
     """
     # modify heads_true to have the same shape as deprels_pred
     # add two dimensions of size 1: (batch_size, 1, 1, seq_len)
-    heads_pred = heads_pred.unsqueeze(1).unsqueeze(2)
+    head_idx_pred = head_idx_pred.unsqueeze(1).unsqueeze(2)
     # expand to (batch_size, n_class_deprel, 1, seq_len)
-    heads_pred = heads_pred.expand(-1, deprel_scores_pred.size(1), -1, -1).clone()
-    heads_pred[heads_pred == DUMMY_ID] = 0
+    head_idx_pred = head_idx_pred.expand(-1, deprel_scores_pred.size(1), -1, -1).clone()
+    head_idx_pred[head_idx_pred == DUMMY_ID] = 0
     # deprels_pred.shape after gather =  (batch_len, n_class_deprel, 1, sq_len)
     # deprels_pred.shape after squeeze =  (batch_len, n_class_deprel, seq_len)
-    deprel_scores_pred = gather(deprel_scores_pred, 2, heads_pred).squeeze(2)
+    deprel_scores_pred = gather(deprel_scores_pred, 2, head_idx_pred).squeeze(2)
 
     return deprel_scores_pred
 
 def compute_loss_head(heads_pred: Tensor, heads_true: Tensor, criterion: CrossEntropyLoss):
     """
-    See _deprel_pred_for_heads for deeper explanation of the shapes of these parameters.
-    heads_pred: (batch_len, seq_len)
-    heads_true: (batch_len, seq_len)
+    heads_pred: (batch_len, seq_len, seq_len); first seq_len is the dependent, second seq_len
+    is the head score
+    heads_true: (batch_len, seq_len); the index of the true head for each dependent
     criterion: the loss function to perform forward propagation with
     """
     return criterion.forward(heads_pred, heads_true)

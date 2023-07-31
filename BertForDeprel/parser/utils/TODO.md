@@ -5,6 +5,8 @@ Then: build Flask server
     - prediction is currently hardcoded to read from and write to conllu files
     - need to load model in an init method and use it for subsequent requests
 
+Next refactoring task: Make a tiny train/test set so we can iterate faster. 1000 items or even just 100 would be fine.
+
 * Note somewhere that we predict one head for each dependent, which helps understand the dimensions, and head index of 0 means root.
 * Try XLM-RoBERTa-XL, which is 2 years newer than xlm-roberta
 * train_adapter is always called! This might be activating some dropouts or similar, which would be detrimental to performance.

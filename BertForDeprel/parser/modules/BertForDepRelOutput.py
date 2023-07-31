@@ -4,8 +4,17 @@ import torch
 
 @dataclass
 class BertForDeprelSentenceOutput:
-    """Each prediction tensor has size (T, C), where T is the maximum sequence length for the containing batch,
-    and C is the number of classes being assigned a probability for the particular tensor."""
+    """Prediction tensors for uposs, xposs, feats, and lemma_scripts have size (T, C),
+    where T is the maximum sequence length for the containing batch, and C is the
+    number of classes being assigned a probability for the particular tensor.
+
+    deprels tensor has size (C, T, T), with the first T corresponding to
+    the dependent token, and the second T corresponding to the head token.
+
+    heads tensor has size (T, T), with the first T corresponding to the
+    dependent token, and the second T containing the head score for each
+    potential head of the dependent.
+    """
     uposs: torch.Tensor
     xposs: torch.Tensor
     feats: torch.Tensor
@@ -21,7 +30,9 @@ class BertForDeprelSentenceOutput:
 
 @dataclass
 class BertForDeprelBatchOutput:
-    """Each prediction tensor has size (B, T, C), where B is the number of sentences in the batch."""
+    """For each field of BertForDeprelSentenceOutput, each corresponding field here has
+    the same size, but with an additional leading dimension for the batch size B.
+    For example, the size of uposs is (B, T, C), and the size of heads is (B, T, T)."""
     uposs: torch.Tensor
     xposs: torch.Tensor
     feats: torch.Tensor

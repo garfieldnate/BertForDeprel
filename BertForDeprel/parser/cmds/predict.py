@@ -65,39 +65,48 @@ class Predict(CMD):
 
         return subparser
 
-    # TODO Next: explain this as much as possible
-    # Then: combine this and the model eval chuliu_heads_pred method; it's the
-    # same except for the constraint logic
-    def __get_constrained_dependencies(self, heads_pred_sentence, deprels_pred, subwords_start, keep_heads: CopyOption, pred_dataset: ConlluDataset, n_sentence: int, idx_converter_sentence: Tensor, device: str):
+    # TODO Next: explain current return type. Return type differs from other
+    # method. Can we refactor to join them?
+    def __get_constrained_dependencies(self, heads_pred_sentence: Tensor, deprels_pred, subwords_start_sentence, keep_heads: CopyOption, pred_dataset: ConlluDataset, n_sentence: int, idx_converter_sentence: Tensor, device: str):
+        """"""
+        # TODO: explain these
         head_true_like = heads_pred_sentence.max(dim=0).indices
         chuliu_heads_pred = head_true_like.clone().cpu().numpy()
         chuliu_heads_list: List[int] = []
 
-        # TODO: explain. What is np here?
+        # Keep the rows and columns corresponding to tokens that begin words
+        # (which we use to represent entire words). Size is (W + 1, W + 1)
+        # (+1 is for dummy root).
         heads_pred_np = heads_pred_sentence[
-            :, subwords_start
-        ][subwords_start]
-        # TODO: why?
+            :, subwords_start_sentence
+        ][subwords_start_sentence]
+        # Chu-Liu/Edmonds code needs a Numpy array, which can only be created from the CPU device
         heads_pred_np = heads_pred_np.cpu().numpy()
 
         forced_relations: List[Tuple] = []
         if keep_heads == "EXISTING":
             forced_relations = pred_dataset.get_constrained_dependency_for_chuliu(n_sentence)
 
-        # TODO: why transpose? Why 1:? Skipping CLS token? But the output is for words, not tokens.
+        # Size is (W + 1,)
         chuliu_heads_vector = chuliu_edmonds_one_root_with_constraints(
-            np.transpose(heads_pred_np, (1, 0)), forced_relations
-        )[1:]
+            heads_pred_np, forced_relations
+        )
+        # Ignore head predicted for dummy root (CLS token); size is (W,)
+        chuliu_heads_vector = chuliu_heads_vector[1:]
+
+        # Convert from word indices to token indices
         for i_dependent_word, chuliu_head_pred in enumerate(chuliu_heads_vector):
             chuliu_heads_pred[
                 idx_converter_sentence[i_dependent_word + 1]
             ] = idx_converter_sentence[chuliu_head_pred]
             chuliu_heads_list.append(int(chuliu_head_pred))
 
-        # TODO: why?
+        # move to device where deprels_pred lives to satisfy _deprel_pred_for_heads requirements
         chuliu_heads_pred = torch.tensor(chuliu_heads_pred).to(device)
 
-        # TODO: explain all that squeezing and unsqueezing
+        # function is designed to work with batch inputs;
+        # unsqueeze to add dummy batch dimension to fit expected input shape, and
+        # squeeze to remove dummy batch dimension from output shape
         deprels_pred_chuliu = _deprel_pred_for_heads(
             deprels_pred.unsqueeze(0), chuliu_heads_pred.unsqueeze(0)
         ).squeeze(0)
@@ -121,7 +130,7 @@ class Predict(CMD):
             (chuliu_heads_list, deprels_pred_chuliu) = self.__get_constrained_dependencies(
                 heads_pred_sentence=raw_sentence_preds.heads,
                 deprels_pred=raw_sentence_preds.deprels,
-                subwords_start=raw_sentence_preds.subwords_start,
+                subwords_start_sentence=raw_sentence_preds.subwords_start,
                 pred_dataset=pred_dataset,
                 keep_heads=partial_pred_config.keep_heads,
                 n_sentence=n_sentence,

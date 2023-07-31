@@ -104,7 +104,7 @@ class SequencePredictionBatch_T:
 class SequenceTrainingBatch_T(SequencePredictionBatch_T):
     """Each field contains all of the tensors of the corresponding field in
     SequenceTraining_T for each sequence in the batch. See that class for more details.
-    Sizes are then (B, T) for each batched field."""
+    Sizes are the same but with a leading dimension of size B."""
     uposs: Tensor
     xposs: Tensor
     heads: Tensor

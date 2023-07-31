@@ -264,24 +264,30 @@ class BertForDeprel(Module):
 
         return results
 
-    def chuliu_heads_pred(self, batch, model_output) -> torch.Tensor:
-        chuliu_heads_pred = batch.heads.clone()
+    def chuliu_heads_pred(self, batch: SequenceTrainingBatch_T, model_output: BertForDeprelBatchOutput) -> torch.Tensor:
+        """Return: (B, T) tensor of predicted head indices"""
+        chuliu_heads_pred = torch.zeros_like(batch.heads)
         for i_sentence, (heads_pred_sentence, subwords_start_sentence, idx_converter_sentence) in enumerate(zip(model_output.heads, batch.subwords_start, batch.idx_converter)):
-            # TODO: explain. What is np here?
+            # Keep the rows and columns corresponding to tokens that begin words
+            # (which we use to represent entire words). Size is (W + 1, W + 1)
+            # (+1 is for dummy root).
             heads_pred_np = heads_pred_sentence[
-                :,subwords_start_sentence
+                :, subwords_start_sentence
             ][subwords_start_sentence]
-            # TODO: why?
+            # Chu-Liu/Edmonds code needs a Numpy array, which can only be created from the CPU device
             heads_pred_np = heads_pred_np.cpu().numpy()
 
-            # TODO: why transpose? Why 1:? Skipping CLS token? But the output is for words, not tokens.
-            chuliu_heads_vector = chuliu_edmonds_one_root(np.transpose(heads_pred_np, (1,0)))[1:]
+            # Size is (W + 1,)
+            chuliu_heads_vector = chuliu_edmonds_one_root(heads_pred_np)
+            # Ignore predicted head for dummy root (CLS token); size is (W,)
+            chuliu_heads_vector = chuliu_heads_vector[1:]
 
+            # Convert from word indices to token indices
             for i_dependent_word, chuliu_head_pred in enumerate(chuliu_heads_vector):
                 chuliu_heads_pred[
                     i_sentence, idx_converter_sentence[i_dependent_word + 1]
                 ] = idx_converter_sentence[chuliu_head_pred]
-        # TODO: what is this return value?
+
         return chuliu_heads_pred
 
 
