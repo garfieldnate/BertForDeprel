@@ -271,9 +271,11 @@ class BertForDeprel(Module):
             # Keep the rows and columns corresponding to tokens that begin words
             # (which we use to represent entire words). Size is (W + 1, W + 1)
             # (+1 is for dummy root).
+
+            subwords_start = subwords_start_sentence.clone()
             heads_pred_np = heads_pred_sentence[
-                :, subwords_start_sentence
-            ][subwords_start_sentence]
+                :, subwords_start == 1
+            ][subwords_start == 1]
             # Chu-Liu/Edmonds code needs a Numpy array, which can only be created from the CPU device
             heads_pred_np = heads_pred_np.cpu().numpy()
 

@@ -52,7 +52,7 @@ class BertForDeprelSentenceOutput:
         )
 
         # Indices for words in the sentence (not subwords)
-        mask = self.subwords_start
+        mask = self.subwords_start == 1
 
         deprels_pred_chuliu_list = deprels_pred_chuliu.max(dim=0).indices[
             mask
@@ -93,13 +93,14 @@ class BertForDeprelSentenceOutput:
         head_true_like = self.heads.max(dim=0).indices
         chuliu_heads_pred = head_true_like.clone().cpu().numpy()
         chuliu_heads_list: List[int] = []
+        subwords_start = self.subwords_start.clone()
 
         # Keep the rows and columns corresponding to tokens that begin words
         # (which we use to represent entire words). Size is (W + 1, W + 1)
         # (+1 is for dummy root).
         heads_pred_np = self.heads[
-            :, self.subwords_start
-        ][self.subwords_start]
+            :, subwords_start
+        ][subwords_start]
         # Chu-Liu/Edmonds code needs a Numpy array, which can only be created from the CPU device
         heads_pred_np = heads_pred_np.cpu().numpy()
 

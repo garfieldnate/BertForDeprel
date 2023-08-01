@@ -33,7 +33,7 @@ class SequencePrediction_T:
     """True if sequence token begins a new word and for the leading CLS token; False
     otherwise. Size is (T). We set to True for the leading CLS token so that the
     Chu-Liu-Edmonds algorithm can use it as the root."""
-    subwords_start: List[bool]
+    subwords_start: List[int]
 
     """Maps word index + 1 to the index in the sequence_token_ids where the word begins. Size is (W)."""
     idx_converter: List[int]
@@ -240,7 +240,7 @@ class ConlluDataset(Dataset):
 
     def _get_input(self, sequence: sentenceJson_T, idx: int) -> SequencePrediction_T:
         sequence_ids = [self.CLS_token_id]
-        subwords_start = [True]
+        subwords_start = [1]
 
         idx_converter = [0]
         tokens_len = [1]
@@ -258,7 +258,7 @@ class ConlluDataset(Dataset):
             idx_converter.append(len(sequence_ids))
             tokens_len.append(len(token_ids))
 
-            subword_start = [True] + [False] * (len(token_ids) - 1)
+            subword_start = [1] + [0] * (len(token_ids) - 1)
             sequence_ids += token_ids
             subwords_start += subword_start
 
