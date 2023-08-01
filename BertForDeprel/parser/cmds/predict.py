@@ -1,23 +1,21 @@
 from argparse import ArgumentParser
 import os
-from typing import List, Tuple
+import sys
+from typing import List
 from conllup.conllup import writeConlluFile, sentenceJson_T
 from timeit import default_timer as timer
 
 import numpy as np
 import torch
 from scipy.sparse.csgraph import minimum_spanning_tree # type: ignore (TODO: why can't PyLance find this?)
-from torch import Tensor, nn
+from torch import nn
 from torch.utils.data import DataLoader
 
 
-from parser.modules.BertForDepRelOutput import BertForDeprelBatchOutput
 from ..cmds.cmd import CMD, SubparsersType
 from ..utils.annotation_schema_utils import resolve_conllu_paths
-from ..utils.chuliu_edmonds_utils import chuliu_edmonds_one_root_with_constraints
-from ..utils.load_data_utils import ConlluDataset, CopyOption, PartialPredictionConfig, SequencePredictionBatch_T
+from ..utils.load_data_utils import ConlluDataset, PartialPredictionConfig, SequencePredictionBatch_T
 from ..modules.BertForDepRel import BertForDeprel
-from ..utils.scores_and_losses_utils import _deprel_pred_for_heads
 from ..utils.types import ModelParams_T
 
 
@@ -65,110 +63,6 @@ class Predict(CMD):
 
         return subparser
 
-    # TODO Next: explain current return type. Return type differs from other
-    # method. Can we refactor to join them?
-    def __get_constrained_dependencies(self, heads_pred_sentence: Tensor, deprels_pred, subwords_start_sentence, keep_heads: CopyOption, pred_dataset: ConlluDataset, n_sentence: int, idx_converter_sentence: Tensor):
-        """"""
-        # TODO: explain these
-        head_true_like = heads_pred_sentence.max(dim=0).indices
-        chuliu_heads_pred = head_true_like.clone().cpu().numpy()
-        chuliu_heads_list: List[int] = []
-
-        # Keep the rows and columns corresponding to tokens that begin words
-        # (which we use to represent entire words). Size is (W + 1, W + 1)
-        # (+1 is for dummy root).
-        heads_pred_np = heads_pred_sentence[
-            :, subwords_start_sentence
-        ][subwords_start_sentence]
-        # Chu-Liu/Edmonds code needs a Numpy array, which can only be created from the CPU device
-        heads_pred_np = heads_pred_np.cpu().numpy()
-
-        forced_relations: List[Tuple] = []
-        if keep_heads == "EXISTING":
-            forced_relations = pred_dataset.get_constrained_dependency_for_chuliu(n_sentence)
-
-        # Size is (W + 1,)
-        chuliu_heads_vector = chuliu_edmonds_one_root_with_constraints(
-            heads_pred_np, forced_relations
-        )
-        # Ignore head predicted for dummy root (CLS token); size is (W,)
-        chuliu_heads_vector = chuliu_heads_vector[1:]
-
-        # Convert from word indices to token indices
-        for i_dependent_word, chuliu_head_pred in enumerate(chuliu_heads_vector):
-            chuliu_heads_pred[
-                idx_converter_sentence[i_dependent_word + 1]
-            ] = idx_converter_sentence[chuliu_head_pred]
-            chuliu_heads_list.append(int(chuliu_head_pred))
-
-        # move to device where deprels_pred lives so they can be operated on together
-        # in _deprel_pred_for_heads
-        chuliu_heads_pred = torch.tensor(chuliu_heads_pred).to(deprels_pred.device)
-
-        # function is designed to work with batch inputs;
-        # unsqueeze to add dummy batch dimension to fit expected input shape, and
-        # squeeze to remove dummy batch dimension from output shape
-        deprels_pred_chuliu = _deprel_pred_for_heads(
-            deprels_pred.unsqueeze(0), chuliu_heads_pred.unsqueeze(0)
-        ).squeeze(0)
-
-        # TODO: what are these return values?
-        return chuliu_heads_list, deprels_pred_chuliu
-
-    def __prediction_iterator(self, preds: BertForDeprelBatchOutput, pred_dataset: ConlluDataset, partial_pred_config: PartialPredictionConfig):
-        # TODO: build this iterator into the batch preds class
-        for sentence_idx in preds.idx:
-            raw_sentence_preds = preds.distributions_for_sentence(int(sentence_idx))
-
-            # TODO Next: encapsulate below in the output classes;
-            # these will then be containers for the raw model outputs, with methods for constructing the final predictions.
-            # the overwrite logic should be done in a separate step, I think.
-            # Start by encapsulating the n_sentence and pred_dataset stuff into the output classes.
-            # sentence_idx = batch.idx[i_sentence]
-            # n_sentence = int(sentence_idx)
-
-            (chuliu_heads_list, deprels_pred_chuliu) = self.__get_constrained_dependencies(
-                heads_pred_sentence=raw_sentence_preds.heads,
-                deprels_pred=raw_sentence_preds.deprels,
-                subwords_start_sentence=raw_sentence_preds.subwords_start,
-                pred_dataset=pred_dataset,
-                keep_heads=partial_pred_config.keep_heads,
-                n_sentence=int(sentence_idx),
-                idx_converter_sentence=raw_sentence_preds.idx_converter)
-
-            mask = raw_sentence_preds.subwords_start
-
-            deprels_pred_chuliu_list = deprels_pred_chuliu.max(dim=0).indices[
-                mask
-            ].tolist()
-
-            uposs_pred_list = raw_sentence_preds.uposs.max(dim=1).indices[
-                mask
-            ].tolist()
-
-            xposs_pred_list = raw_sentence_preds.xposs.max(dim=1).indices[
-                mask
-            ].tolist()
-
-            feats_pred_list = raw_sentence_preds.feats.max(dim=1).indices[
-                mask
-            ].tolist()
-
-            lemma_scripts_pred_list = raw_sentence_preds.lemma_scripts.max(dim=1).indices[
-                mask
-            ].tolist()
-
-            yield pred_dataset.construct_sentence_prediction(
-                            int(sentence_idx),
-                            uposs_pred_list,
-                            xposs_pred_list,
-                            chuliu_heads_list,
-                            deprels_pred_chuliu_list,
-                            feats_pred_list,
-                            lemma_scripts_pred_list,
-                            partial_pred_config=partial_pred_config
-                        )
-
     def __call__(self, args, model_params: ModelParams_T):
         super().__call__(args, model_params)
         in_to_out_paths, partial_pred_config, data_loader_params = self.__validate_args(args, model_params)
@@ -190,12 +84,13 @@ class Predict(CMD):
             with torch.no_grad():
                 for batch in pred_loader:
                     batch = batch.to(args.device)
+                    # TODO: why is this detach()ed when we already have no_grad()?
                     preds = model.forward(batch).detach()
 
                     time_from_start = 0
                     parsing_speed = 0
-                    for predicted_sentence in self.__prediction_iterator(preds, pred_dataset, partial_pred_config):
-                        predicted_sentences.append(predicted_sentence)
+                    for predicted_sentence in preds.iter():
+                        predicted_sentences.append(predicted_sentence.get_predictions(partial_pred_config))
 
                         parsed_sentence_counter += 1
                         time_from_start = timer() - start
@@ -242,7 +137,7 @@ class Predict(CMD):
 
             if args.overwrite != True:
                 if os.path.isfile(output_path):
-                    print(f"file '{output_path}' already exists and overwrite!=False, skipping ...")
+                    print(f"file '{output_path}' already exists and overwrite!=False, skipping ...", file=sys.stderr)
                     continue
             in_to_out_paths[input_path] = output_path
 
@@ -259,5 +154,8 @@ class Predict(CMD):
             "batch_size": model_params.batch_size,
             "num_workers": args.num_workers,
         }
+
+        if not in_to_out_paths:
+            raise Exception("No legal input/output files determined.")
 
         return in_to_out_paths, partial_pred_config, data_loader_params

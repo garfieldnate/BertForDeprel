@@ -1,7 +1,7 @@
 from torch import Tensor
 
 from ..utils.load_data_utils import SequencePredictionBatch_T
-from .BiAffineTrankit import FixedClassDeepBiAffineClassifier
+from .FixedClassDeepBiAffineClassifier import FixedClassDeepBiAffineClassifier
 from .BertForDepRelOutput import BertForDeprelBatchOutput
 
 
@@ -46,5 +46,7 @@ class PosAndDeprelParserHead(Module):
             deprels=deprels,
             heads=heads,
             subwords_start=batch.subwords_start,
-            idx_converter=batch.idx_converter
+            idx_converter=batch.idx_converter,
+            idx=batch.idx,
+            dataset=batch.dataset,
         )

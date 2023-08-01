@@ -182,4 +182,4 @@ def test_add_prediction_to_sentence_json_keep_all():
 
 def test_get_contrained_dependency_for_chuliu():
     dataset = ConlluDataset(PATH_TEST_CONLLU, model_params_test, "predict", compute_annotation_schema_if_not_found=True)
-    assert dataset.get_constrained_dependency_for_chuliu(1) == [(1, 2), (2, 0), (3, 4), (4, 2), (5, 4)]
+    assert dataset.get_specified_heads_for_chuliu(1) == [(1, 2), (2, 0), (3, 4), (4, 2), (5, 4)]

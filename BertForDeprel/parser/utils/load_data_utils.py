@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import os
 from typing import Dict, List, Any, Self, Tuple, TypeVar, Literal
 
-from conllup.conllup import sentenceJson_T, _featuresConllToJson, _featuresJsonToConll, readConlluFile
+from conllup.conllup import sentenceJson_T, _featuresJsonToConll, readConlluFile
 
 from torch.utils.data import Dataset
 from torch import tensor, Tensor
@@ -10,7 +10,7 @@ from transformers import AutoTokenizer, PreTrainedTokenizer, PreTrainedTokenizer
 
 from .types import ModelParams_T
 from .annotation_schema_utils import compute_annotation_schema, resolve_conllu_paths, is_annotation_schema_empty, NONE_VOCAB
-from .lemma_script_utils import apply_lemma_rule, gen_lemma_script
+from .lemma_script_utils import gen_lemma_script
 
 
 DUMMY_ID = -1
@@ -71,6 +71,7 @@ class SequencePredictionBatch_T:
 
     # Size is (B,); index for each sequence in the original dataset.
     idx: Tensor
+    dataset: 'ConlluDataset'
     sequence_token_ids: Tensor
     # Tensor of shape [batch_size, max_seq_length] containing attention masks to be used to avoid contribution of PAD tokens.
     # Size is (B, T). See https://huggingface.co/docs/transformers/glossary#attention-mask.
@@ -94,6 +95,7 @@ class SequencePredictionBatch_T:
             idx_converter = self.idx_converter
         return SequencePredictionBatch_T(
             idx=self.idx,
+            dataset=self.dataset,
             sequence_token_ids=self.sequence_token_ids.to(device),
             attn_masks=self.attn_masks.to(device),
             subwords_start=subwords_start,
@@ -343,6 +345,7 @@ class ConlluDataset(Dataset):
 
         return SequencePredictionBatch_T(
             idx=idx_batch,
+            dataset=self,
             sequence_token_ids=seq_ids_batch,
             subwords_start=subwords_start_batch,
             attn_masks=attn_masks,
@@ -371,51 +374,12 @@ class ConlluDataset(Dataset):
             lemma_scripts=lemma_scripts_batch,
         )
 
-    def construct_sentence_prediction(self,
-                                        idx,
-                                        uposs_preds: List[int]=[],
-                                        xposs_preds: List[int]=[],
-                                        chuliu_heads: List[int]=[],
-                                        deprels_pred_chulius: List[int]=[],
-                                        feats_preds: List[int]=[],
-                                        lemma_scripts_preds: List[int]=[],
-                                        partial_pred_config = PartialPredictionConfig(),
-                                        ) -> sentenceJson_T:
-        """Constructs the final sentence structure prediction by overwriting the model's predictions with
-        the input data where specified. The metadata is copied as well, since it is not predicted."""
-        predicted_sentence: sentenceJson_T = self.sequences[idx].sentence_json.copy()
-        tokens = list(predicted_sentence["treeJson"]["nodesJson"].values())
-        annotation_schema = self.model_params.annotation_schema
-
-        # For each of the predicted fields, we overwrite the value copied from the input with the predicted value
-        # if configured to do so.
-        for n_token, token in enumerate(tokens):
-            if partial_pred_config.keep_upos=="NONE" or (partial_pred_config.keep_upos=="EXISTING" and token["UPOS"] == "_"):
-                token["UPOS"] = annotation_schema.uposs[uposs_preds[n_token]]
-
-            if partial_pred_config.keep_xpos == "NONE" or (partial_pred_config.keep_xpos=="EXISTING" and token["XPOS"] == "_"):
-                token["XPOS"] = annotation_schema.xposs[xposs_preds[n_token]]
-
-            if partial_pred_config.keep_heads == "NONE" or (partial_pred_config.keep_heads == "EXISTING" and token["HEAD"] == DUMMY_ID): # this one is special as for keep_heads == "EXISTING", we already handled the case earlier in the code
-                token["HEAD"] = chuliu_heads[n_token]
-
-            if partial_pred_config.keep_deprels == "NONE" or (partial_pred_config.keep_deprels=='EXISTING' and token["DEPREL"] == "_"):
-                token["DEPREL"] = annotation_schema.deprels[deprels_pred_chulius[n_token]]
-
-            if partial_pred_config.keep_feats == "NONE" or (partial_pred_config.keep_feats=="EXISTING" and token["FEATS"] == {}):
-                token["FEATS"] = _featuresConllToJson(annotation_schema.feats[feats_preds[n_token]])
-
-            if partial_pred_config.keep_lemmas == "NONE" or (partial_pred_config.keep_lemmas=="EXISTING" and token["LEMMA"] == "_"):
-                lemma_script = annotation_schema.lemma_scripts[lemma_scripts_preds[n_token]]
-                token["LEMMA"] = apply_lemma_rule(token["FORM"], lemma_script)
-        return predicted_sentence
-
 
     # TODO: This suggests to me that we shouldn't actually have separate predict/train
     # data classes. It's weird to have to refer back to the JSON here.
     # TODO: this exists solely to construct the argument to chuliu_edmonds_one_root_with_constraints.
     # Move it closer to that usage (inside that function or in its (only) caller).
-    def get_constrained_dependency_for_chuliu(self, idx: int) -> List[Tuple]:
+    def get_specified_heads_for_chuliu(self, idx: int) -> List[Tuple]:
         """
         idx: index of the sentence in the dataset
         Returns a list of tuples (i, j), indicating that the ith word is
