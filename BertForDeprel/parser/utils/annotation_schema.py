@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping, Self
+from typing import Any, Dict, Iterable, List, Mapping, Self, Tuple
 
 from conllup.conllup import _featuresJsonToConll, featuresJson_T, sentenceJson_T
 
@@ -42,6 +42,7 @@ class AnnotationSchema_T:
     xposs: List[str] = field(default_factory=list)
     feats: List[str] = field(default_factory=list)
     lemma_scripts: List[str] = field(default_factory=list)
+    lemma_script_allow_copy: bool = False
 
     def __post_init__(self):
         self.dep2i = _compute_labels2i(self.deprels)
@@ -82,7 +83,7 @@ class AnnotationSchema_T:
 
     def encode_lemma_script(self, form: str, lemma: str) -> int:
         return self._get_index(
-            gen_lemma_script(form, lemma),
+            gen_lemma_script(form, lemma, self.lemma_script_allow_copy),
             self.lem2i,
             form,
         )
@@ -105,12 +106,30 @@ class AnnotationSchema_T:
         return index
 
 
-def compute_annotation_schema(sentences: Iterable[sentenceJson_T]):
+def choose_lemma_scripts(
+    lemma_scripts_no_copy: List[str], lemma_scripts_allow_copy: List[str]
+) -> Tuple[List[str], bool]:
+    lemma_scripts_no_copy = sorted(set(lemma_scripts_no_copy))
+    lemma_scripts_allow_copy = sorted(set(lemma_scripts_allow_copy))
+    # if lengths are equal, use the one with shorter scripts
+    if len(lemma_scripts_no_copy) < len(lemma_scripts_allow_copy) or (
+        len(lemma_scripts_no_copy) == len(lemma_scripts_allow_copy)
+        and len("".join(lemma_scripts_no_copy)) < len("".join(lemma_scripts_allow_copy))
+    ):
+        return lemma_scripts_no_copy, False
+    else:
+        return lemma_scripts_allow_copy, True
+
+
+def compute_annotation_schema(
+    sentences: Iterable[sentenceJson_T],
+) -> AnnotationSchema_T:
     uposs: List[str] = []
     xposs: List[str] = []
     feats: List[str] = []
     deprels: List[str] = []
-    lemma_scripts: List[str] = []
+    lemma_scripts_no_copy: List[str] = []
+    lemma_scripts_allow_copy: List[str] = []
     for sentence_json in sentences:
         for token in sentence_json["treeJson"]["nodesJson"].values():
             deprels.append(token["DEPREL"])
@@ -118,20 +137,31 @@ def compute_annotation_schema(sentences: Iterable[sentenceJson_T]):
             xposs.append(token["XPOS"])
             feats.append(_featuresJsonToConll(token["FEATS"]))
 
-            lemma_script = gen_lemma_script(token["FORM"], token["LEMMA"])
-            lemma_scripts.append(lemma_script)
+            # TODO: per the literature, we should generate both with and without copy,
+            # then keep the lemma scripts list that is shorter
+            for scripts, allow_copy in [
+                (lemma_scripts_no_copy, False),
+                (lemma_scripts_allow_copy, True),
+            ]:
+                lemma_script = gen_lemma_script(
+                    token["FORM"], token["LEMMA"], allow_copy=allow_copy
+                )
+                scripts.append(lemma_script)
 
     deprels.append(NONE_VOCAB)
     uposs.append(NONE_VOCAB)
     xposs.append(NONE_VOCAB)
     feats.append(NONE_VOCAB)
-    lemma_scripts.append(NONE_VOCAB)
+    lemma_scripts_no_copy.append(NONE_VOCAB)
+    lemma_scripts_allow_copy.append(NONE_VOCAB)
 
     deprels = sorted(set(deprels))
     uposs = sorted(set(uposs))
     xposs = sorted(set(xposs))
     feats = sorted(set(feats))
-    lemma_scripts = sorted(set(lemma_scripts))
+    lemma_scripts, allow_copy = choose_lemma_scripts(
+        lemma_scripts_no_copy, lemma_scripts_allow_copy
+    )
 
     return AnnotationSchema_T(
         deprels=deprels,
@@ -139,4 +169,5 @@ def compute_annotation_schema(sentences: Iterable[sentenceJson_T]):
         xposs=xposs,
         feats=feats,
         lemma_scripts=lemma_scripts,
+        lemma_script_allow_copy=allow_copy,
     )
