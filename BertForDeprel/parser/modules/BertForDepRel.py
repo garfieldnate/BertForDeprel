@@ -399,27 +399,16 @@ class BertForDeprel(Module):
         self._active_model = active_model
 
         self.__init_language_model_layer(embedding_type)
-        llm_hidden_size = (
-            self.llm_layer.config.hidden_size
-        )  # expected to get embedding size of bert custom model
 
-        n_uposs = len(annotation_schema.uposs)
-        n_xposs = len(annotation_schema.xposs)
-        n_deprels = len(annotation_schema.deprels)
-        n_feats = len(annotation_schema.feats)
-        n_lemma_scripts = len(annotation_schema.lemma_scripts)
-        self.tagger_layer = PosAndDeprelParserHead(
-            n_uposs, n_deprels, n_feats, n_lemma_scripts, n_xposs, llm_hidden_size
-        )
+        # Save and restore before in activate() so that model results are consistent
+        # between mono- and multi-lingual scenarios.
+        self._rng_state = torch.get_rng_state()
 
         if pretrained_model_paths:
             print("Loading weights of the pretrained model(s)")
             self.__load_pretrained_checkpoints(
                 pretrained_model_paths,
             )
-            # self.__apply_pretrained_checkpoint(
-            #     self._checkpoints[self._active_model], no_classifier_heads
-            # )
 
         self.activate(self._active_model)
         self.activate(self._active_model)
@@ -673,6 +662,21 @@ class BertForDeprel(Module):
         """Activate an already-loaded pretrained model.
         model_name: which loaded model to activate.
         """
+        torch.set_rng_state(self._rng_state)
+        llm_hidden_size = (
+            self.llm_layer.config.hidden_size
+        )  # expected to get embedding size of bert custom model
+        n_uposs = len(self.annotation_schema.uposs)
+        n_xposs = len(self.annotation_schema.xposs)
+        n_deprels = len(self.annotation_schema.deprels)
+        n_feats = len(self.annotation_schema.feats)
+        n_lemma_scripts = len(self.annotation_schema.lemma_scripts)
+        # seed = torch.seed()
+        # bytes = torch.get_rng_state()
+        self.tagger_layer = PosAndDeprelParserHead(
+            n_uposs, n_deprels, n_feats, n_lemma_scripts, n_xposs, llm_hidden_size
+        )
+
         if self.pretrained_model_paths:
             if model_name not in self._checkpoints:
                 raise ValueError(

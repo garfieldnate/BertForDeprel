@@ -191,6 +191,7 @@ def _test_eval():
 @pytest.mark.slow
 @pytest.mark.fragile
 def test_train_and_predict():
+    torch.use_deterministic_algorithms(True)
     _test_model_train()
     _test_predict()
     _test_eval()
