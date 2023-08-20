@@ -77,7 +77,7 @@ def _test_model_train():
     _test_model_train_single(
         PATH_TRAIN_NAIJA,
         PATH_TEST_NAIJA,
-        PATH_MODELS_DIR,
+        NAIJA_MODEL_DIR,
         [
             EvalResult(
                 LAS_epoch=0.0,
@@ -140,11 +140,11 @@ def _test_predict_single(
 
 
 def _test_predict():
-    model_config = ModelParams_T.from_model_path(PATH_MODELS_DIR)
+    model_config = ModelParams_T.from_model_path(NAIJA_MODEL_DIR)
     device_config = get_devices_configuration("-1")
 
     model = BertForDeprel.load_single_pretrained_for_prediction(
-        PATH_MODELS_DIR, device_config.device
+        NAIJA_MODEL_DIR, device_config.device
     )
     predictor = Predictor(
         model,
@@ -170,7 +170,7 @@ def _test_eval():
     device_config = get_devices_configuration("-1")
 
     model = BertForDeprel.load_single_pretrained_for_prediction(
-        PATH_MODELS_DIR, device_config.device
+        NAIJA_MODEL_DIR, device_config.device
     )
 
     sentences = load_conllu_sentences(PATH_TEST_NAIJA)
