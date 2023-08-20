@@ -1,10 +1,11 @@
 import json
 import sys
 from pathlib import Path
+from typing import List
 
 import pytest
 import torch
-from conllup.conllup import emptyNodeJson, emptySentenceJson
+from conllup.conllup import emptyNodeJson, emptySentenceJson, sentenceJson_T
 from torch.utils.data import DataLoader
 
 from BertForDeprel.parser.cmds.predict import Predictor
@@ -21,17 +22,25 @@ from BertForDeprel.parser.utils.types import (
 
 PARENT = Path(__file__).parent
 PATH_TEST_DATA_FOLDER = PARENT / "data"
-
-PATH_TEST_CONLLU = PATH_TEST_DATA_FOLDER / "naija.test.conllu"
-PATH_TRAIN_CONLLU = PATH_TEST_DATA_FOLDER / "naija.train.conllu"
-PATH_EXPECTED_PREDICTIONS = PATH_TEST_DATA_FOLDER / "naija.predictions.expected.json"
 PATH_MODELS_DIR = PATH_TEST_DATA_FOLDER / "models"
 
+PATH_TRAIN_NAIJA = PATH_TEST_DATA_FOLDER / "naija.train.conllu"
+PATH_TEST_NAIJA = PATH_TEST_DATA_FOLDER / "naija.test.conllu"
+PATH_EXPECTED_PREDICTIONS_NAIJA = (
+    PATH_TEST_DATA_FOLDER / "naija.predictions.expected.json"
+)
+NAIJA_MODEL_DIR = PATH_MODELS_DIR / "naija"
 
-def _test_model_train():
-    torch.manual_seed(42)
+PATH_TEST_ENGLISH = PATH_TEST_DATA_FOLDER / "english.test.conllu"
+PATH_TRAIN_ENGLISH = PATH_TEST_DATA_FOLDER / "english.train.conllu"
+PATH_EXPECTED_PREDICTIONS_ENGLISH = (
+    PATH_TEST_DATA_FOLDER / "english.predictions.expected.json"
+)
+ENGLISH_MODEL_DIR = PATH_MODELS_DIR / "english"
 
-    train_sentences = load_conllu_sentences(PATH_TRAIN_CONLLU)
+
+def _test_model_train_single(path_train, path_test, path_out, expected_eval):
+    train_sentences = load_conllu_sentences(path_train)
     annotation_schema = compute_annotation_schema(train_sentences)
 
     device_config = get_devices_configuration("-1")
@@ -41,7 +50,7 @@ def _test_model_train():
     print(model.max_position_embeddings)
 
     train_dataset = model.encode_dataset(train_sentences)
-    test_sentences = load_conllu_sentences(PATH_TEST_CONLLU)
+    test_sentences = load_conllu_sentences(path_test)
     test_dataset = model.encode_dataset(test_sentences)
     training_config = TrainingConfig(
         max_epochs=1,
@@ -57,13 +66,18 @@ def _test_model_train():
     scores = [s.rounded(3) for s in scores]
 
     model.save_model(  # type: ignore https://github.com/pytorch/pytorch/issues/81462 # noqa: E501
-        PATH_MODELS_DIR, training_config
+        path_out, training_config
     )
 
-    # TODO: put time in result and check that, as well; or specify deadline to pytest
-    # TODO: these numbers are different on every machine, and therefore this test FAILS
-    # anywhere except for mine. Need to figure out how to make it pass anywhere.
-    assert scores == pytest.approx(
+    assert scores == pytest.approx(expected_eval)
+
+
+def _test_model_train():
+    torch.manual_seed(42)
+    _test_model_train_single(
+        PATH_TRAIN_NAIJA,
+        PATH_TEST_NAIJA,
+        PATH_MODELS_DIR,
         [
             EvalResult(
                 LAS_epoch=0.0,
@@ -101,8 +115,28 @@ def _test_model_train():
                 loss_epoch=0.537,
                 training_diagnostics=None,
             ),
-        ]
+        ],
     )
+
+
+def _test_predict_single(
+    predictor: Predictor, input: List[sentenceJson_T], expected: Path, max_seconds: int
+):
+    actual, elapsed_seconds = predictor.predict(input)
+
+    with open(expected, "r") as f:
+        expected = json.load(f)
+
+    with open("actual.json", "w") as f:
+        json.dump(actual, f, indent=2)
+
+    assert actual == expected
+    # On my M2, it's <7s.
+    if elapsed_seconds > max_seconds:
+        print(
+            f"WARNING: Prediction took a long time: {elapsed_seconds} seconds.",
+            file=sys.stderr,
+        )
 
 
 def _test_predict():
@@ -118,8 +152,7 @@ def _test_predict():
         device_config.multi_gpu,
     )
 
-    sentences = load_conllu_sentences(PATH_TEST_CONLLU)
-
+    sentences = load_conllu_sentences(PATH_TEST_NAIJA)
     # add a sentence too large for the model; this should be skipped in the output
     too_long = emptySentenceJson()
     too_long["metaJson"]["sent_id"] = "too_long"
@@ -127,20 +160,8 @@ def _test_predict():
         too_long["treeJson"]["nodesJson"][f"{i}"] = emptyNodeJson(ID=f"{i}")
     sentences.insert(2, too_long)
 
-    pred_dataset = model.encode_dataset(sentences)
-
-    actual, elapsed_seconds = predictor.predict(pred_dataset)
-
-    with open(PATH_EXPECTED_PREDICTIONS, "r") as f:
-        expected = json.load(f)
-
-    assert actual == expected
-    # On my M2, it's <7s.
-    if elapsed_seconds > 10:
-        print(
-            f"WARNING: Prediction took a long time: {elapsed_seconds} seconds.",
-            file=sys.stderr,
-        )
+    # On my M1, it's <7s.
+    _test_predict_single(predictor, sentences, PATH_EXPECTED_PREDICTIONS_NAIJA, 10)
 
 
 def _test_eval():
@@ -152,7 +173,7 @@ def _test_eval():
         PATH_MODELS_DIR, device_config.device
     )
 
-    sentences = load_conllu_sentences(PATH_TEST_CONLLU)
+    sentences = load_conllu_sentences(PATH_TEST_NAIJA)
     test_dataset = model.encode_dataset(sentences)
     test_loader = DataLoader(
         test_dataset,

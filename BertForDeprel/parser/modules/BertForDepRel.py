@@ -262,7 +262,7 @@ class EvalResult:
         )
 
 
-DEFAULT_MODEL_NAME = "thingamabobfoofoofoo"
+DEFAULT_MODEL_NAME = "DEFAULT"
 
 
 class BertForDeprel(Module):
@@ -274,7 +274,7 @@ class BertForDeprel(Module):
         model_params = ModelParams_T.from_model_path(pretrained_model_path)
         model = BertForDeprel(
             model_params.embedding_type,
-            model_params.annotation_schema,
+            {DEFAULT_MODEL_NAME: model_params.annotation_schema},
             device,
             {DEFAULT_MODEL_NAME: pretrained_model_path},
             DEFAULT_MODEL_NAME,
@@ -310,7 +310,7 @@ class BertForDeprel(Module):
 
         model = BertForDeprel(
             model_params.embedding_type,
-            model_params.annotation_schema,
+            {DEFAULT_MODEL_NAME: model_params.annotation_schema},
             device,
             pretrained_model_paths,
             active_model,
@@ -330,7 +330,7 @@ class BertForDeprel(Module):
         model_params = ModelParams_T.from_model_path(pretrained_model_path)
         model = BertForDeprel(
             model_params.embedding_type,
-            new_annotation_schema,
+            {DEFAULT_MODEL_NAME: new_annotation_schema},
             device,
             {DEFAULT_MODEL_NAME: pretrained_model_path},
             DEFAULT_MODEL_NAME,
@@ -351,7 +351,7 @@ class BertForDeprel(Module):
         model_params.annotation_schema.update(new_annotation_schema)
         model = BertForDeprel(
             model_params.embedding_type,
-            model_params.annotation_schema,
+            {DEFAULT_MODEL_NAME: model_params.annotation_schema},
             device,
             {DEFAULT_MODEL_NAME: pretrained_model_path},
             DEFAULT_MODEL_NAME,
@@ -370,19 +370,18 @@ class BertForDeprel(Module):
         The model will be a blank slate that must be trained."""
         model = BertForDeprel(
             embedding_type,
-            annotation_schema,
+            {DEFAULT_MODEL_NAME: annotation_schema},
             device,
             pretrained_model_paths={},
             active_model=DEFAULT_MODEL_NAME,
             no_classifier_heads=False,
         )
-        model.train()
-        return model
+        return model.train()
 
     def __init__(
         self,
         embedding_type: str,
-        annotation_schema: AnnotationSchema_T,
+        annotation_schemata: Dict[str, AnnotationSchema_T],
         device: torch.device,
         pretrained_model_paths: Dict[str, Path],
         active_model: str,
@@ -391,14 +390,16 @@ class BertForDeprel(Module):
         """Clients should not call this directly. Instead, use one of the static
         constructors to create a new model or load a pre-trained one."""
         super().__init__()
+        self._active_model = active_model
         self.embedding_type = embedding_type
-        self.annotation_schema = annotation_schema
+        self.annotation_schemata = annotation_schemata
         self.pretrained_model_paths = pretrained_model_paths
         self.device = device
         self.user_diagnostic_info = {}
-        self._active_model = active_model
 
-        self.__init_language_model_layer(embedding_type)
+        self.__init_language_model_layer(
+            embedding_type, pretrained_model_paths.keys() or [active_model]
+        )
 
         # Save and restore before in activate() so that model results are consistent
         # between mono- and multi-lingual scenarios.
@@ -410,9 +411,9 @@ class BertForDeprel(Module):
                 pretrained_model_paths,
             )
 
-        self.activate(self._active_model)
-        self.activate(self._active_model)
-        self.activate(self._active_model)
+        self._activate(self._active_model, no_classifier_heads)
+        self._activate(self._active_model, no_classifier_heads)
+        self._activate(self._active_model, no_classifier_heads)
 
         self.total_trainable_parameters = self.get_total_trainable_parameters()
         print("TOTAL TRAINABLE PARAMETERS : ", self.total_trainable_parameters)
@@ -421,25 +422,20 @@ class BertForDeprel(Module):
 
         self.to(device)
 
-    def __init_language_model_layer(self, embedding_type):
+    def __init_language_model_layer(self, embedding_type, adapter_names: Iterable[str]):
         # TODO: user gets to choose the type here, so it's wrong to
         # assume XLMRobertaModel
         self.llm_layer: XLMRobertaModel = AutoModel.from_pretrained(embedding_type)
-        self.llm_layer.config
+
         adapter_config = PfeifferConfig(reduction_factor=4, non_linearity="gelu")
-        adapter_name = DEFAULT_MODEL_NAME
         # save/restore RNG state so that we can add adapters deterministically
         # (otherwise, we get different results for one model depending on what other
         # models were also loaded)
         rng = torch.get_rng_state()
-        self.llm_layer.add_adapter(adapter_name, config=adapter_config)
-        torch.set_rng_state(rng)
-        self.llm_layer.add_adapter("foo", config=adapter_config)
-        torch.set_rng_state(rng)
-        self.llm_layer.add_adapter("bar", config=adapter_config)
-        # calls set_active_adapters for us; we can always turn training on because our
-        # predict method always runs with torch.no_grad()
-        self.llm_layer.train_adapter([adapter_name])
+        for name in adapter_names:
+            torch.set_rng_state(rng)
+            self.llm_layer.add_adapter(name, config=adapter_config)
+        self.llm_layer.set_active_adapters([self._active_model])
 
     def _set_criterions_and_optimizer(self):
         self.criterion = CrossEntropyLoss(ignore_index=-1)
@@ -463,6 +459,12 @@ class BertForDeprel(Module):
         new_model = super().to(device)
         new_model.device = device
         return new_model
+
+    def train(self, mode=True) -> Self:
+        super().train(mode)
+        if mode:
+            self.llm_layer.train_adapter([self._active_model])
+        return self
 
     def encode_dataset(self, sentences: Iterable[sentenceJson_T]) -> UDDataset:
         """Convert sentences into a dataset encoded for use with the model
@@ -627,6 +629,8 @@ class BertForDeprel(Module):
         return chuliu_heads_pred
 
     def save_model(self, model_dir: Path, training_config: TrainingConfig):
+        """Save the model and training configuration to the given directory."""
+        model_dir.mkdir(parents=True, exist_ok=True)
         trainable_weight_names = [
             n for n, p in self.llm_layer.named_parameters() if p.requires_grad
         ] + [n for n, p in self.tagger_layer.named_parameters() if p.requires_grad]
@@ -670,6 +674,11 @@ class BertForDeprel(Module):
         """Activate an already-loaded pretrained model.
         model_name: which loaded model to activate.
         """
+        self._activate(model_name, False)
+
+    def _activate(self, model_name: str, no_classifier_heads: bool):
+        self.annotation_schema = self.annotation_schemata[self._active_model]
+
         torch.set_rng_state(self._rng_state)
         llm_hidden_size = (
             self.llm_layer.config.hidden_size
@@ -691,7 +700,9 @@ class BertForDeprel(Module):
                     f"Specified model name {model_name} not found among loaded models: "
                     f"{self._checkpoints.keys()}"
                 )
-            self.__apply_pretrained_checkpoint(self._checkpoints[self._active_model])
+            self.__apply_pretrained_checkpoint(
+                self._checkpoints[self._active_model], no_classifier_heads
+            )
         self._active_model = model_name
 
     def __load_pretrained_checkpoints(self, model_paths: Dict[str, Path]):
