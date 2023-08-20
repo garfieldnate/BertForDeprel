@@ -373,7 +373,7 @@ class BertForDeprel(Module):
             annotation_schema,
             device,
             pretrained_model_paths={},
-            active_model=None,
+            active_model=DEFAULT_MODEL_NAME,
             no_classifier_heads=False,
         )
         model.train()
@@ -385,7 +385,7 @@ class BertForDeprel(Module):
         annotation_schema: AnnotationSchema_T,
         device: torch.device,
         pretrained_model_paths: Dict[str, Path],
-        active_model: Optional[str],
+        active_model: str,
         no_classifier_heads: bool,
     ):
         """Clients should not call this directly. Instead, use one of the static
@@ -393,9 +393,10 @@ class BertForDeprel(Module):
         super().__init__()
         self.embedding_type = embedding_type
         self.annotation_schema = annotation_schema
-        self.pretrained_model_path = pretrained_model_paths
+        self.pretrained_model_paths = pretrained_model_paths
         self.device = device
         self.user_diagnostic_info = {}
+        self._active_model = active_model
 
         self.__init_language_model_layer(embedding_type)
         llm_hidden_size = (
@@ -416,10 +417,13 @@ class BertForDeprel(Module):
             self.__load_pretrained_checkpoints(
                 pretrained_model_paths,
             )
-            self._active_model = active_model
-            self.__apply_pretrained_checkpoint(
-                self._checkpoints[self._active_model], no_classifier_heads
-            )
+            # self.__apply_pretrained_checkpoint(
+            #     self._checkpoints[self._active_model], no_classifier_heads
+            # )
+
+        self.activate(self._active_model)
+        self.activate(self._active_model)
+        self.activate(self._active_model)
 
         self.total_trainable_parameters = self.get_total_trainable_parameters()
         print("TOTAL TRAINABLE PARAMETERS : ", self.total_trainable_parameters)
@@ -669,12 +673,13 @@ class BertForDeprel(Module):
         """Activate an already-loaded pretrained model.
         model_name: which loaded model to activate.
         """
-        if model_name not in self._checkpoints:
-            raise ValueError(
-                f"Specified model name {model_name} not found among loaded models: "
-                f"{self._checkpoints.keys()}"
-            )
-        self.__apply_pretrained_checkpoint(self._checkpoints[self._active_model])
+        if self.pretrained_model_paths:
+            if model_name not in self._checkpoints:
+                raise ValueError(
+                    f"Specified model name {model_name} not found among loaded models: "
+                    f"{self._checkpoints.keys()}"
+                )
+            self.__apply_pretrained_checkpoint(self._checkpoints[self._active_model])
         self._active_model = model_name
 
     def __load_pretrained_checkpoints(self, model_paths: Dict[str, Path]):
