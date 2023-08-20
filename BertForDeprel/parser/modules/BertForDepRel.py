@@ -262,7 +262,7 @@ class EvalResult:
         )
 
 
-DEFAULT_MODEL_NAME = "default"
+DEFAULT_MODEL_NAME = "thingamabobfoofoofoo"
 
 
 class BertForDeprel(Module):
@@ -427,8 +427,16 @@ class BertForDeprel(Module):
         self.llm_layer: XLMRobertaModel = AutoModel.from_pretrained(embedding_type)
         self.llm_layer.config
         adapter_config = PfeifferConfig(reduction_factor=4, non_linearity="gelu")
-        adapter_name = "Pfeiffer_gelu"
+        adapter_name = DEFAULT_MODEL_NAME
+        # save/restore RNG state so that we can add adapters deterministically
+        # (otherwise, we get different results for one model depending on what other
+        # models were also loaded)
+        rng = torch.get_rng_state()
         self.llm_layer.add_adapter(adapter_name, config=adapter_config)
+        torch.set_rng_state(rng)
+        self.llm_layer.add_adapter("foo", config=adapter_config)
+        torch.set_rng_state(rng)
+        self.llm_layer.add_adapter("bar", config=adapter_config)
         # calls set_active_adapters for us; we can always turn training on because our
         # predict method always runs with torch.no_grad()
         self.llm_layer.train_adapter([adapter_name])
