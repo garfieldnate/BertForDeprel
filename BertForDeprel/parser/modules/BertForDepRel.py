@@ -2,6 +2,8 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import re
+import sys
 from timeit import default_timer as timer
 from typing import Any, Dict, Iterable, Optional, Self
 
@@ -299,23 +301,50 @@ class BertForDeprel(Module):
         model_params = ModelParams_T.from_model_path(
             pretrained_model_paths[active_model]
         )
-        for other_name, other_path in pretrained_model_paths.items():
-            other_params = ModelParams_T.from_model_path(other_path)
+        annotation_schemata = {}
+        for name, path in pretrained_model_paths.items():
+            other_params = ModelParams_T.from_model_path(path)
             if other_params.embedding_type != model_params.embedding_type:
                 raise ValueError(
                     "All loaded models must have the same embedding types."
                     "{active_model} has {model_params.embedding_type}, but "
-                    f"{other_name} has {other_params.embedding_type}."
+                    f"{name} has {other_params.embedding_type}."
                 )
-
+            annotation_schemata[name] = other_params.annotation_schema
+        # breaks:
         model = BertForDeprel(
             model_params.embedding_type,
-            {DEFAULT_MODEL_NAME: model_params.annotation_schema},
+            annotation_schemata,
             device,
             pretrained_model_paths,
             active_model,
             no_classifier_heads=False,
         )
+        # model = BertForDeprel(
+        #     model_params.embedding_type,
+        #     {active_model: model_params.annotation_schema},
+        #     device,
+        #     {active_model: pretrained_model_paths[active_model]},
+        #     active_model,
+        #     no_classifier_heads=False,
+        # )
+        # model = BertForDeprel(
+        #     model_params.embedding_type,
+        #     {"naija": model_params.annotation_schema},
+        #     device,
+        #     {"naija": pretrained_model_paths[active_model]},
+        #     "naija",
+        #     no_classifier_heads=False,
+        # )
+        # works, and it's NOT because of the model name:
+        # model = BertForDeprel(
+        #     model_params.embedding_type,
+        #     {DEFAULT_MODEL_NAME: model_params.annotation_schema},
+        #     device,
+        #     {DEFAULT_MODEL_NAME: pretrained_model_paths[active_model]},
+        #     DEFAULT_MODEL_NAME,
+        #     no_classifier_heads=False,
+        # )
         model.eval()
         return model
 
@@ -435,7 +464,6 @@ class BertForDeprel(Module):
         for name in adapter_names:
             torch.set_rng_state(rng)
             self.llm_layer.add_adapter(name, config=adapter_config)
-        self.llm_layer.set_active_adapters([self._active_model])
 
     def _set_criterions_and_optimizer(self):
         self.criterion = CrossEntropyLoss(ignore_index=-1)
@@ -637,6 +665,7 @@ class BertForDeprel(Module):
         state = {"adapter": {}, "tagger": {}}
         for k, v in self.llm_layer.state_dict().items():
             if k in trainable_weight_names:
+                # TODO: normalize k name here
                 state["adapter"][k] = v
         for k, v in self.tagger_layer.state_dict().items():
             if k in trainable_weight_names:
@@ -675,8 +704,10 @@ class BertForDeprel(Module):
         model_name: which loaded model to activate.
         """
         self._activate(model_name, False)
+        self.to(self.device)
 
     def _activate(self, model_name: str, no_classifier_heads: bool):
+        self._active_model = model_name
         self.annotation_schema = self.annotation_schemata[self._active_model]
 
         torch.set_rng_state(self._rng_state)
@@ -700,10 +731,11 @@ class BertForDeprel(Module):
                     f"Specified model name {model_name} not found among loaded models: "
                     f"{self._checkpoints.keys()}"
                 )
-            self.__apply_pretrained_checkpoint(
-                self._checkpoints[self._active_model], no_classifier_heads
-            )
-        self._active_model = model_name
+            self.__apply_pretrained_checkpoint(no_classifier_heads)
+        if self.training:
+            self.llm_layer.train_adapter([self._active_model])
+        else:
+            self.llm_layer.set_active_adapters([self._active_model])
 
     def __load_pretrained_checkpoints(self, model_paths: Dict[str, Path]):
         self._checkpoints = {}
@@ -712,9 +744,8 @@ class BertForDeprel(Module):
             checkpoint = torch.load(checkpoint_path)
             self._checkpoints[model_name] = checkpoint
 
-    def __apply_pretrained_checkpoint(
-        self, checkpoint_state, no_classifier_heads=False
-    ):
+    def __apply_pretrained_checkpoint(self, no_classifier_heads=False):
+        checkpoint_state = self._checkpoints[self._active_model]
         tagger_pretrained_dict = self.tagger_layer.state_dict()
         for layer_name, weights in checkpoint_state["tagger"].items():
             if no_classifier_heads and layer_name in [
@@ -735,10 +766,29 @@ class BertForDeprel(Module):
 
         llm_pretrained_dict = self.llm_layer.state_dict()
         for layer_name, weights in checkpoint_state["adapter"].items():
+            layer_name = BertForDeprel.__rename_adapter_layer(
+                layer_name, self._active_model
+            )
             if layer_name in llm_pretrained_dict:
                 llm_pretrained_dict[layer_name] = weights
+            else:
+                print(
+                    f"WARNING: Not loading unrecognized pretrained layer {layer_name}",
+                    file=sys.stderr,
+                )
         self.llm_layer.load_state_dict(llm_pretrained_dict)
         return
+
+    ADAPTER_NAME_RE = re.compile(r"adapters.(\w+).adapter_")
+
+    @staticmethod
+    def __rename_adapter_layer(layer_name: str, adapter_name: str):
+        """Rename adapter layer with the given adapter name."""
+        return re.sub(
+            BertForDeprel.ADAPTER_NAME_RE,
+            f"adapters.{adapter_name}.adapter_",
+            layer_name,
+        )
 
 
 # To reactivate if problem in the loading of the model states
