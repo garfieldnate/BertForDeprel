@@ -7,6 +7,7 @@ import sys
 from timeit import default_timer as timer
 from typing import Any, Dict, Iterable, Optional, Self
 
+import torch.backends
 import numpy as np
 import torch
 import torch.mps
@@ -419,7 +420,6 @@ class BertForDeprel(Module):
         """Clients should not call this directly. Instead, use one of the static
         constructors to create a new model or load a pre-trained one."""
         super().__init__()
-        self._active_model = active_model
         self.embedding_type = embedding_type
         self.annotation_schemata = annotation_schemata
         self.pretrained_model_paths = pretrained_model_paths
@@ -432,7 +432,7 @@ class BertForDeprel(Module):
 
         # Save and restore before in activate() so that model results are consistent
         # between mono- and multi-lingual scenarios.
-        self._rng_state = torch.get_rng_state()
+        self.__pre_activation_rng_state = torch.get_rng_state()
 
         if pretrained_model_paths:
             print("Loading weights of the pretrained model(s)")
@@ -440,14 +440,25 @@ class BertForDeprel(Module):
                 pretrained_model_paths,
             )
 
-        self._activate(self._active_model, no_classifier_heads)
-        self._activate(self._active_model, no_classifier_heads)
-        self._activate(self._active_model, no_classifier_heads)
+        # gonna find out if this is caused by the adapter activation or the head
+        # activation
+        self._activate("english", no_classifier_heads)
+        self._activate(active_model, no_classifier_heads)
+        self._activate(active_model, no_classifier_heads)
+        self._set_criterions_and_optimizer()
 
         self.total_trainable_parameters = self.get_total_trainable_parameters()
         print("TOTAL TRAINABLE PARAMETERS : ", self.total_trainable_parameters)
 
-        self._set_criterions_and_optimizer()
+        # self._pre_to_rng = torch.get_rng_state()
+
+        # rng_state = torch.get_rng_state()
+        # print(f"Current seed before to() is {torch.seed()}", file=sys.stderr)
+        # torch.set_rng_state(rng_state)
+        # rng_state = torch.get_rng_state()
+        # print(f"Current seed before to() is {torch.seed()}", file=sys.stderr)
+        # torch.set_rng_state(rng_state)
+        # torch.backends.
 
         self.to(device)
 
@@ -704,13 +715,21 @@ class BertForDeprel(Module):
         model_name: which loaded model to activate.
         """
         self._activate(model_name, False)
+        # torch.set_rng_state(self._pre_to_rng)
+        # self._set_criterions_and_optimizer()
+
+        # rng_state = torch.get_rng_state()
+        # print(f"Current seed before to() is {torch.seed()}", file=sys.stderr)
+        # torch.set_rng_state(rng_state)
+
         self.to(self.device)
+        # torch.set_rng_state(rng_state)
 
     def _activate(self, model_name: str, no_classifier_heads: bool):
         self._active_model = model_name
         self.annotation_schema = self.annotation_schemata[self._active_model]
 
-        torch.set_rng_state(self._rng_state)
+        torch.set_rng_state(self.__pre_activation_rng_state)
         llm_hidden_size = (
             self.llm_layer.config.hidden_size
         )  # expected to get embedding size of bert custom model
@@ -719,8 +738,6 @@ class BertForDeprel(Module):
         n_deprels = len(self.annotation_schema.deprels)
         n_feats = len(self.annotation_schema.feats)
         n_lemma_scripts = len(self.annotation_schema.lemma_scripts)
-        # seed = torch.seed()
-        # bytes = torch.get_rng_state()
         self.tagger_layer = PosAndDeprelParserHead(
             n_uposs, n_deprels, n_feats, n_lemma_scripts, n_xposs, llm_hidden_size
         )
@@ -731,6 +748,7 @@ class BertForDeprel(Module):
                     f"Specified model name {model_name} not found among loaded models: "
                     f"{self._checkpoints.keys()}"
                 )
+            self.llm_layer.set_active_adapters([])
             self.__apply_pretrained_checkpoint(no_classifier_heads)
         if self.training:
             self.llm_layer.train_adapter([self._active_model])
@@ -744,7 +762,7 @@ class BertForDeprel(Module):
             checkpoint = torch.load(checkpoint_path)
             self._checkpoints[model_name] = checkpoint
 
-    def __apply_pretrained_checkpoint(self, no_classifier_heads=False):
+    def __apply_pretrained_checkpoint_to_tagger(self, no_classifier_heads=False):
         checkpoint_state = self._checkpoints[self._active_model]
         tagger_pretrained_dict = self.tagger_layer.state_dict()
         for layer_name, weights in checkpoint_state["tagger"].items():
@@ -764,6 +782,8 @@ class BertForDeprel(Module):
             tagger_pretrained_dict[layer_name] = weights
         self.tagger_layer.load_state_dict(tagger_pretrained_dict)
 
+    def __apply_pretrained_checkpoint_to_adapter(self):
+        checkpoint_state = self._checkpoints[self._active_model]
         llm_pretrained_dict = self.llm_layer.state_dict()
         for layer_name, weights in checkpoint_state["adapter"].items():
             layer_name = BertForDeprel.__rename_adapter_layer(
@@ -777,7 +797,43 @@ class BertForDeprel(Module):
                     file=sys.stderr,
                 )
         self.llm_layer.load_state_dict(llm_pretrained_dict)
-        return
+
+    def __apply_pretrained_checkpoint(self, no_classifier_heads=False):
+        self.__apply_pretrained_checkpoint_to_tagger(no_classifier_heads)
+        self.__apply_pretrained_checkpoint_to_adapter()
+        # checkpoint_state = self._checkpoints[self._active_model]
+        # tagger_pretrained_dict = self.tagger_layer.state_dict()
+        # for layer_name, weights in checkpoint_state["tagger"].items():
+        #     if no_classifier_heads and layer_name in [
+        #         "deprel.pairwise_weight",
+        #         "uposs_ffn.weight",
+        #         "uposs_ffn.bias",
+        #         "xposs_ffn.weight",
+        #         "xposs_ffn.bias",
+        #         "lemma_scripts_ffn.weight",
+        #         "lemma_scripts_ffn.bias",
+        #         "feats_ffn.weight",
+        #         "feats_ffn.bias",
+        #     ]:
+        #         print(f"Overwriting pretrained layer {layer_name}")
+        #         continue
+        #     tagger_pretrained_dict[layer_name] = weights
+        # self.tagger_layer.load_state_dict(tagger_pretrained_dict)
+
+        # llm_pretrained_dict = self.llm_layer.state_dict()
+        # for layer_name, weights in checkpoint_state["adapter"].items():
+        #     layer_name = BertForDeprel.__rename_adapter_layer(
+        #         layer_name, self._active_model
+        #     )
+        #     if layer_name in llm_pretrained_dict:
+        #         llm_pretrained_dict[layer_name] = weights
+        #     else:
+        #         print(
+        #             f"WARNING: Not loading unrecognized pretrained layer {layer_name}",
+        #             file=sys.stderr,
+        #         )
+        # self.llm_layer.load_state_dict(llm_pretrained_dict)
+        # return
 
     ADAPTER_NAME_RE = re.compile(r"adapters.(\w+).adapter_")
 

@@ -214,6 +214,11 @@ def _test_predict():
     )
 
     # model.activate("english")
+    # model.activate("naija")
+    # assert False
+    _test_predict_single(
+        predictor, naija_sentences, PATH_EXPECTED_PREDICTIONS_NAIJA, 10
+    )
     # english_sentences = load_conllu_sentences(PATH_TEST_ENGLISH)
     # _test_predict_single(
     #     predictor, english_sentences, PATH_EXPECTED_PREDICTIONS_ENGLISH, 10
