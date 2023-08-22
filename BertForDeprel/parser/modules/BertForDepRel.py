@@ -442,6 +442,7 @@ class BertForDeprel(Module):
 
         # gonna find out if this is caused by the adapter activation or the head
         # activation
+        # with torch.random.fork_rng():
         self._activate("english", no_classifier_heads)
         self._activate(active_model, no_classifier_heads)
         self._activate(active_model, no_classifier_heads)
@@ -667,8 +668,9 @@ class BertForDeprel(Module):
         # TODO: what is this return value?
         return chuliu_heads_pred
 
-    def save_model(self, model_dir: Path, training_config: TrainingConfig):
-        """Save the model and training configuration to the given directory."""
+    def save(self, model_dir: Path, training_config: TrainingConfig):
+        """Save the currently active model and training configuration to the given
+        directory."""
         model_dir.mkdir(parents=True, exist_ok=True)
         trainable_weight_names = [
             n for n, p in self.llm_layer.named_parameters() if p.requires_grad
@@ -722,6 +724,7 @@ class BertForDeprel(Module):
         # print(f"Current seed before to() is {torch.seed()}", file=sys.stderr)
         # torch.set_rng_state(rng_state)
 
+        # with torch.random.fork_rng():
         self.to(self.device)
         # torch.set_rng_state(rng_state)
 

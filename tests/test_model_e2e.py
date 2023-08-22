@@ -2,6 +2,8 @@ import json
 import sys
 from pathlib import Path
 from typing import List
+import numpy as np
+import random
 
 import pytest
 import torch
@@ -71,7 +73,7 @@ def _test_model_train_single(path_train, path_test, path_out, expected_eval):
     scores = [next(scores_generator), next(scores_generator)]
     scores = [s.rounded(3) for s in scores]
 
-    model.save_model(  # type: ignore https://github.com/pytorch/pytorch/issues/81462 # noqa: E501
+    model.save(  # type: ignore https://github.com/pytorch/pytorch/issues/81462 # noqa: E501
         path_out, training_config
     )
 
@@ -213,8 +215,22 @@ def _test_predict():
         predictor, naija_sentences, PATH_EXPECTED_PREDICTIONS_NAIJA, 10
     )
 
+    model.save(Path("before_activate"), TrainingConfig())
     # model.activate("english")
-    # model.activate("naija")
+    np_rng = np.random.get_state()
+    rng = random.getstate()
+    with torch.random.fork_rng():
+        model.activate("english")
+    np.random.set_state(np_rng)
+    random.setstate(rng)
+    with torch.random.fork_rng():
+        model.activate("naija")
+    np.random.set_state(np_rng)
+    random.setstate(rng)
+    # naija/english: different output, as expected
+    # naija/naija: same output!
+    # naija/english/naija: same output!
+    model.save(Path("after_activate"), TrainingConfig())
     # assert False
     _test_predict_single(
         predictor, naija_sentences, PATH_EXPECTED_PREDICTIONS_NAIJA, 10
