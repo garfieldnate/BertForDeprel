@@ -2,8 +2,6 @@ import json
 import sys
 from pathlib import Path
 from typing import List
-import numpy as np
-import random
 
 import pytest
 import torch
@@ -195,12 +193,13 @@ def _test_predict():
     model = BertForDeprel.load_pretrained_for_prediction(
         {"naija": NAIJA_MODEL_DIR, "english": ENGLISH_MODEL_DIR},
         "naija",
+        # torch.device("cpu"),
         device_config.device,
     )
     predictor = Predictor(
         model,
         PredictionConfig(batch_size=model_config.batch_size, num_workers=1),
-        device_config.multi_gpu,
+        False,
     )
 
     naija_sentences = load_conllu_sentences(PATH_TEST_NAIJA)
@@ -216,33 +215,11 @@ def _test_predict():
         predictor, naija_sentences, PATH_EXPECTED_PREDICTIONS_NAIJA, 10
     )
 
-    # model.save(Path("before_activate"), TrainingConfig())
-    # # model.activate("english")
-    # np_rng = np.random.get_state()
-    # rng = random.getstate()
-    # mps_rng = torch.mps.get_rng_state()
-    # with torch.random.fork_rng():
-    #     model.activate("english")
-    # np.random.set_state(np_rng)
-    # random.setstate(rng)
-    # torch.mps.set_rng_state(mps_rng)
-    # with torch.random.fork_rng():
-    #     model.activate("naija")
-    # np.random.set_state(np_rng)
-    # random.setstate(rng)
-    # torch.mps.set_rng_state(mps_rng)
-    # naija/english: different output, as expected
-    # naija/naija: same output!
-    # naija/english/naija: same output!
-    model.save(Path("after_activate"), TrainingConfig())
-    # assert False
+    english_sentences = load_conllu_sentences(PATH_TEST_ENGLISH)
+    model.activate("english")
     _test_predict_single(
-        predictor, naija_sentences, PATH_EXPECTED_PREDICTIONS_NAIJA, 10
+        predictor, english_sentences, PATH_EXPECTED_PREDICTIONS_ENGLISH, 10
     )
-    # english_sentences = load_conllu_sentences(PATH_TEST_ENGLISH)
-    # _test_predict_single(
-    #     predictor, english_sentences, PATH_EXPECTED_PREDICTIONS_ENGLISH, 10
-    # )
 
 
 def _test_eval():
@@ -293,6 +270,8 @@ def _test_eval():
 @pytest.mark.slow
 @pytest.mark.fragile
 def test_train_and_predict():
+    # not needed, but great for confidence when debugging!
+    # torch.use_deterministic_algorithms(True)
     _test_model_train()
     _test_predict()
     _test_eval()
