@@ -443,13 +443,9 @@ class BertForDeprel(Module):
         # gonna find out if this is caused by the adapter activation or the head
         # activation
         # with torch.random.fork_rng():
-        self._activate("english", no_classifier_heads)
+        # self._activate("english", no_classifier_heads)
+        # self._activate(active_model, no_classifier_heads)
         self._activate(active_model, no_classifier_heads)
-        self._activate(active_model, no_classifier_heads)
-        self._set_criterions_and_optimizer()
-
-        self.total_trainable_parameters = self.get_total_trainable_parameters()
-        print("TOTAL TRAINABLE PARAMETERS : ", self.total_trainable_parameters)
 
         # self._pre_to_rng = torch.get_rng_state()
 
@@ -480,7 +476,8 @@ class BertForDeprel(Module):
     def _set_criterions_and_optimizer(self):
         self.criterion = CrossEntropyLoss(ignore_index=-1)
         self.optimizer = AdamW(self.parameters(), lr=0.00005)
-        print("Criterion and Optimizer set")
+        self.total_trainable_parameters = self.get_total_trainable_parameters()
+        print("TOTAL TRAINABLE PARAMETERS : ", self.total_trainable_parameters)
 
     @property
     def max_position_embeddings(self):
@@ -501,6 +498,9 @@ class BertForDeprel(Module):
         return new_model
 
     def train(self, mode=True) -> Self:
+        if not self.__criterion_and_optimizer_set:
+            self._set_criterions_and_optimizer()
+            self.__criterion_and_optimizer_set = True
         super().train(mode)
         if mode:
             self.llm_layer.train_adapter([self._active_model])
@@ -757,6 +757,9 @@ class BertForDeprel(Module):
             self.llm_layer.train_adapter([self._active_model])
         else:
             self.llm_layer.set_active_adapters([self._active_model])
+
+        # todo: might only make sense to do this if we're training
+        self.__criterion_and_optimizer_set = False
 
     def __load_pretrained_checkpoints(self, model_paths: Dict[str, Path]):
         self._checkpoints = {}

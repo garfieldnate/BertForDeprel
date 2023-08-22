@@ -7,6 +7,7 @@ import random
 
 import pytest
 import torch
+import torch.mps
 from conllup.conllup import emptyNodeJson, emptySentenceJson, sentenceJson_T
 from torch.utils.data import DataLoader
 
@@ -215,18 +216,21 @@ def _test_predict():
         predictor, naija_sentences, PATH_EXPECTED_PREDICTIONS_NAIJA, 10
     )
 
-    model.save(Path("before_activate"), TrainingConfig())
-    # model.activate("english")
-    np_rng = np.random.get_state()
-    rng = random.getstate()
-    with torch.random.fork_rng():
-        model.activate("english")
-    np.random.set_state(np_rng)
-    random.setstate(rng)
-    with torch.random.fork_rng():
-        model.activate("naija")
-    np.random.set_state(np_rng)
-    random.setstate(rng)
+    # model.save(Path("before_activate"), TrainingConfig())
+    # # model.activate("english")
+    # np_rng = np.random.get_state()
+    # rng = random.getstate()
+    # mps_rng = torch.mps.get_rng_state()
+    # with torch.random.fork_rng():
+    #     model.activate("english")
+    # np.random.set_state(np_rng)
+    # random.setstate(rng)
+    # torch.mps.set_rng_state(mps_rng)
+    # with torch.random.fork_rng():
+    #     model.activate("naija")
+    # np.random.set_state(np_rng)
+    # random.setstate(rng)
+    # torch.mps.set_rng_state(mps_rng)
     # naija/english: different output, as expected
     # naija/naija: same output!
     # naija/english/naija: same output!
@@ -289,6 +293,6 @@ def _test_eval():
 @pytest.mark.slow
 @pytest.mark.fragile
 def test_train_and_predict():
-    # _test_model_train()
+    _test_model_train()
     _test_predict()
-    # _test_eval()
+    _test_eval()
